@@ -1,0 +1,11 @@
+[project]
+name = "clean-img-tool"
+version = "0.1.0"
+description = "Delete unreferenced images from markdown files"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+# 添加这一段
+[project.scripts]
+clean-img = "clean_img:main"
