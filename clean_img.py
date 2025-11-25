@@ -5,8 +5,9 @@ import sys
 from pathlib import Path
 from urllib.parse import unquote
 
-# 支持的图片扩展名，可根据需要添加
+# 支持的图片扩展名
 IMG_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp', '.tiff'}
+
 
 def get_files(directory, extensions=None):
     """递归获取目录下所有匹配扩展名的文件"""
@@ -14,7 +15,7 @@ def get_files(directory, extensions=None):
     if not path.exists():
         print(f"错误: 目录不存在 -> {directory}")
         sys.exit(1)
-    
+
     files = []
     for p in path.rglob('*'):
         if p.is_file():
@@ -22,20 +23,20 @@ def get_files(directory, extensions=None):
                 files.append(p)
     return files
 
+
 def extract_image_refs(md_file):
     """从 Markdown 文件中提取引用的图片文件名"""
     refs = set()
     try:
         with open(md_file, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
-            
-            # 1. 匹配 Markdown 图片语法: ![alt](path)
-            # 这里的正则比较宽容，提取圆括号内的内容
+
+            # 1. 匹配标准 Markdown 图片语法: ![alt](path)
             md_pattern = re.compile(r'!\[.*?\]\((.*?)\)')
             for match in md_pattern.findall(content):
                 # 去掉可能存在的 title 部分，例如 "img.png 'title'"
                 url = match.split()[0] if match else ""
-                # 提取文件名 (忽略路径) 并解码 (处理 %20 等)
+                # 提取文件名
                 filename = Path(unquote(url)).name
                 if filename:
                     refs.add(filename)
@@ -46,18 +47,33 @@ def extract_image_refs(md_file):
                 filename = Path(unquote(match)).name
                 if filename:
                     refs.add(filename)
-                    
+
+            # 3. [新增] 匹配 Obsidian/Wiki 语法: ![[filename]]
+            # 正则解释：!? 表示感叹号可选（防止有人写 [[img.png]] 也作为引用）
+            # \[\[(.*?)\]\] 提取双括号内的内容
+            wiki_pattern = re.compile(r'!?\[\[(.*?)\]\]')
+            for match in wiki_pattern.findall(content):
+                # Obsidian 可能包含大小参数，例如 ![[image.png|100]]
+                # 我们只需要 | 符号前面的部分
+                url = match.split('|')[0].strip()
+                # 提取文件名并解码
+                filename = Path(unquote(url)).name
+                if filename:
+                    refs.add(filename)
+
     except Exception as e:
         print(f"读取文件出错 {md_file}: {e}")
-    
+
     return refs
 
+
 def main():
-    parser = argparse.ArgumentParser(description="删除未被 Markdown 引用的图片工具")
+    parser = argparse.ArgumentParser(description="删除未被 Markdown 引用的图片工具 (支持 Obsidian 语法)")
     parser.add_argument('md_dir', help="Markdown 文件所在的目录路径")
     parser.add_argument('img_dir', help="图片所在的目录路径")
-    parser.add_argument('--delete', action='store_true', help="【危险】如果不加此参数，仅打印将要删除的文件。加上此参数将真正执行删除。")
-    
+    parser.add_argument('--delete', action='store_true',
+                        help="【危险】如果不加此参数，仅打印将要删除的文件。加上此参数将真正执行删除。")
+
     args = parser.parse_args()
 
     md_dir = Path(args.md_dir)
@@ -69,17 +85,17 @@ def main():
 
     print(f"[-] 正在扫描 图片 目录: {img_dir}")
     image_files = get_files(img_dir, IMG_EXTENSIONS)
-    # 创建一个映射：文件名 -> 文件完整路径列表 (处理同名文件情况)
+
     image_map = {}
     for img in image_files:
         if img.name not in image_map:
             image_map[img.name] = []
         image_map[img.name].append(img)
-    
+
     print(f"    发现 {len(image_files)} 个图片文件")
 
     # 提取所有引用
-    print("[-] 正在分析 Markdown 引用...")
+    print("[-] 正在分析 Markdown 引用 (含 Obsidian 语法)...")
     referenced_filenames = set()
     for md in md_files:
         refs = extract_image_refs(md)
@@ -88,7 +104,6 @@ def main():
     print(f"    在文档中找到了 {len(referenced_filenames)} 个唯一的图片引用")
 
     # 找出未引用的图片
-    # 逻辑：遍历图片目录中的文件，如果文件名不在引用列表中，则视为未引用
     to_delete = []
     for img_name, img_paths in image_map.items():
         if img_name not in referenced_filenames:
@@ -100,17 +115,17 @@ def main():
         return
 
     print(f"\n[!] 发现 {len(to_delete)} 个未引用的图片：")
-    
+
     total_size = 0
     for p in to_delete:
         try:
             size = p.stat().st_size
             total_size += size
-            print(f"    [未引用] {p.relative_to(img_dir)} ({size/1024:.2f} KB)")
+            print(f"    [未引用] {p.relative_to(img_dir)} ({size / 1024:.2f} KB)")
         except:
             print(f"    [未引用] {p}")
 
-    print(f"\n    总计可释放空间: {total_size/1024/1024:.2f} MB")
+    print(f"\n    总计可释放空间: {total_size / 1024 / 1024:.2f} MB")
 
     # 执行删除逻辑
     if args.delete:
@@ -129,6 +144,7 @@ def main():
             print("\n[x] 操作已取消。")
     else:
         print("\n[提示] 当前为预览模式。请在命令后加上 --delete 参数来执行真正的删除操作。")
+
 
 if __name__ == "__main__":
     main()
